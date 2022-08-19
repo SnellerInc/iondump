@@ -67,16 +67,16 @@ func main() {
 
 	// Prepare object stream
 
-	size, err := sizeWithoutTrailer(client, bucket, object)
-	if err != nil {
-		exit(err)
-	}
-
 	obj, err := client.GetObject(context.Background(), bucket, object, minio.GetObjectOptions{})
 	if err != nil {
 		exit(err)
 	}
 	defer obj.Close()
+
+	size, err := sizeWithoutTrailer(obj)
+	if err != nil {
+		exit(err)
+	}
 
 	inputWithoutTrailer := &io.LimitedReader{R: obj, N: size}
 	inputWithBVM := newBVMReader(inputWithoutTrailer)
@@ -132,16 +132,10 @@ func s3split(name string) (string, string) {
 
 /// The sizeWithoutTrailer function returns the size of the requested object
 /// excluding the size of the Sneller specific trailer and offset
-func sizeWithoutTrailer(client *minio.Client, bucket string, object string) (int64, error) {
+func sizeWithoutTrailer(obj *minio.Object) (int64, error) {
 
 	// The Sneller 'ion.zst' format contains a trailer and a 4-byte offset pointing
 	// to the beginning of this trailer
-
-	obj, err := client.GetObject(context.Background(), bucket, object, minio.GetObjectOptions{})
-	if err != nil {
-		exit(err)
-	}
-	defer obj.Close()
 
 	stat, err := obj.Stat()
 	if err != nil {
@@ -153,7 +147,11 @@ func sizeWithoutTrailer(client *minio.Client, bucket string, object string) (int
 	_, err = obj.ReadAt(data, stat.Size-4)
 	if err != nil && err != io.EOF {
 		return -1, err
+	}
 
+	pos, err := obj.Seek(0, 0)
+	if err != nil || pos != 0 {
+		return -1, err
 	}
 
 	offset := binary.LittleEndian.Uint32(data)
